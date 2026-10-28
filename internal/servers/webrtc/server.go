@@ -163,6 +163,11 @@ type addSessionCandidatesReq struct {
 	res      chan addSessionCandidatesRes
 }
 
+type findSessionReq struct {
+	secret uuid.UUID
+	res    chan *session
+}
+
 type deleteSessionRes struct {
 	err error
 }
@@ -232,6 +237,7 @@ type Server struct {
 	chCloseSession         chan *session
 	chAddSessionCandidates chan addSessionCandidatesReq
 	chDeleteSession        chan deleteSessionReq
+	chFindSession          chan findSessionReq
 	chAPISessionsList      chan serverAPISessionsListReq
 	chAPISessionsGet       chan serverAPISessionsGetReq
 	chAPIConnsKick         chan serverAPISessionsKickReq
@@ -253,6 +259,7 @@ func (s *Server) Initialize() error {
 	s.chCloseSession = make(chan *session)
 	s.chAddSessionCandidates = make(chan addSessionCandidatesReq)
 	s.chDeleteSession = make(chan deleteSessionReq)
+	s.chFindSession = make(chan findSessionReq)
 	s.chAPISessionsList = make(chan serverAPISessionsListReq)
 	s.chAPISessionsGet = make(chan serverAPISessionsGetReq)
 	s.chAPIConnsKick = make(chan serverAPISessionsKickReq)
@@ -420,6 +427,9 @@ outer:
 
 			req.res <- addSessionCandidatesRes{sx: sx}
 
+		case req := <-s.chFindSession:
+			req.res <- s.sessionsBySecret[req.secret]
+
 		case req := <-s.chDeleteSession:
 			sx, ok := s.sessionsBySecret[req.secret]
 			if !ok {
@@ -579,6 +589,17 @@ func (s *Server) addSessionCandidates(
 
 	case <-s.ctx.Done():
 		return addSessionCandidatesRes{err: fmt.Errorf("terminated")}
+	}
+}
+
+// findSession is called by webRTCHTTPServer.
+func (s *Server) findSession(secret uuid.UUID) *session {
+	req := findSessionReq{secret: secret, res: make(chan *session)}
+	select {
+	case s.chFindSession <- req:
+		return <-req.res
+	case <-s.ctx.Done():
+		return nil
 	}
 }
 

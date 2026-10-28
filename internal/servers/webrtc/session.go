@@ -267,6 +267,7 @@ type session struct {
 	secret    uuid.UUID
 	mutex     sync.RWMutex
 	reader    *stream.Reader
+	abr       *abrSession
 	pc        *webrtc.PeerConnection
 	user      string
 	expiresAt *time.Time
@@ -531,6 +532,29 @@ func (s *session) runPublish(
 func (s *session) runRead(errGroupCtx context.Context, errGroup *errgroup.Group, req *initialRequestReq) (int, error) {
 	ip, _, _ := net.SplitHostPort(s.remoteAddr)
 
+	// ABR paths are virtual: they are served from their variant paths.
+	confRes, err := s.pathManager.FindPathConf(defs.PathFindPathConfReq{
+		Author: s,
+		AccessRequest: defs.PathAccessRequest{
+			Name:                 s.pathName,
+			Query:                s.query,
+			UserAgent:            s.userAgent,
+			Proto:                auth.ProtocolWebRTC,
+			ID:                   &s.uuid,
+			Credentials:          s.credentials,
+			IP:                   net.ParseIP(ip),
+			EnableAskCredentials: true,
+		},
+	})
+	if err == nil && len(confRes.Conf.ABRVariants) != 0 {
+		s.mutex.Lock()
+		s.user = confRes.AuthRes.User
+		s.expiresAt = confRes.AuthRes.ExpiresAt
+		s.mutex.Unlock()
+
+		return s.runReadABR(errGroupCtx, req, confRes.Conf)
+	}
+
 	res, err := s.pathManager.AddReader(defs.PathAddReaderReq{
 		Author: s,
 		AccessRequest: defs.PathAccessRequest{
@@ -751,6 +775,19 @@ func (s *session) addCandidates(
 	case <-s.ctx.Done():
 		return addSessionCandidatesRes{err: fmt.Errorf("terminated")}
 	}
+}
+
+// abrPatch is called by webRTCHTTPServer through Server.
+func (s *session) abrPatch(body []byte) (*abrState, error) {
+	s.mutex.RLock()
+	a := s.abr
+	s.mutex.RUnlock()
+
+	if a == nil {
+		return nil, fmt.Errorf("session is not an ABR session (or is not connected yet)")
+	}
+
+	return a.patch(body)
 }
 
 // APIReaderDescribe implements reader.

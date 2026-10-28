@@ -235,6 +235,9 @@ type Path struct {
 	AlwaysAvailableFile     string                 `json:"alwaysAvailableFile"`
 	AlwaysAvailableRecorded bool                   `json:"alwaysAvailableRecorded"`
 
+	// ABR
+	ABRVariants []ABRVariant `json:"abrVariants"`
+
 	// Forward
 	Forward Forward `json:"forward"`
 

@@ -14,6 +14,9 @@ import (
 type OutboundTrack struct {
 	Caps webrtc.RTPCodecCapability
 
+	// OnRTCP is called with every RTCP packet received from the remote peer (optional).
+	OnRTCP func([]rtcp.Packet)
+
 	track      *webrtc.TrackLocalStaticRTP
 	ssrc       uint32
 	rtcpSender *rtpsender.Sender
@@ -67,9 +70,13 @@ func (t *OutboundTrack) setup(p *PeerConnection) error {
 				return
 			}
 
-			_, err2 = rtcp.Unmarshal(buf[:n])
+			pkts, err2 := rtcp.Unmarshal(buf[:n])
 			if err2 != nil {
 				panic(err2)
+			}
+
+			if t.OnRTCP != nil {
+				t.OnRTCP(pkts)
 			}
 		}
 	}()

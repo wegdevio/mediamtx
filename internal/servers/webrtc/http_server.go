@@ -35,6 +35,9 @@ var readIndex []byte
 //go:embed reader.js
 var readerJS []byte
 
+//go:embed abr_index.html
+var abrIndex []byte
+
 var (
 	reWHIPWHEPNoID   = regexp.MustCompile("^/(.+?)/(whip|whep)$")
 	reWHIPWHEPWithID = regexp.MustCompile("^/(.+?)/(whip|whep)/(.+?)$")
@@ -270,6 +273,10 @@ func (s *httpServer) onWHIPPatch(ctx *gin.Context, rawSecret string) {
 	}
 
 	contentType := httpp.ParseContentType(ctx.Request.Header.Get("Content-Type"))
+	if contentType == "application/json" {
+		s.onABRRequest(ctx, secret)
+		return
+	}
 	if contentType != "application/trickle-ice-sdpfrag" {
 		s.writeErrorNoLog(ctx, http.StatusBadRequest, fmt.Errorf("invalid Content-Type"))
 		return
@@ -325,6 +332,32 @@ func (s *httpServer) onWHIPPatch(ctx *gin.Context, rawSecret string) {
 	ctx.AbortWithStatusJSON(http.StatusNoContent, &defs.APIOK{
 		Status: defs.APIOKStatusOK,
 	})
+}
+
+// onABRRequest handles PATCH (application/json) and GET on an ABR session.
+func (s *httpServer) onABRRequest(ctx *gin.Context, secret uuid.UUID) {
+	sx := s.parent.findSession(secret)
+	if sx == nil {
+		s.writeErrorNoLog(ctx, http.StatusNotFound, ErrSessionNotFound)
+		return
+	}
+
+	var body []byte
+	if ctx.Request.Method == http.MethodPatch {
+		var err error
+		body, err = io.ReadAll(&customLimitReader{ctx.Request.Body, maxInboundSDPSize})
+		if err != nil {
+			return
+		}
+	}
+
+	st, err := sx.abrPatch(body)
+	if err != nil {
+		s.writeErrorNoLog(ctx, http.StatusBadRequest, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, st)
 }
 
 func (s *httpServer) onWHIPDelete(ctx *gin.Context, rawSecret string) {
@@ -406,6 +439,14 @@ func (s *httpServer) onRequest(ctx *gin.Context) {
 		case http.MethodPatch:
 			s.onWHIPPatch(ctx, m[3])
 
+		case http.MethodGet:
+			secret, err := uuid.Parse(m[3])
+			if err != nil {
+				s.writeErrorNoLog(ctx, http.StatusBadRequest, fmt.Errorf("invalid secret"))
+				return
+			}
+			s.onABRRequest(ctx, secret)
+
 		case http.MethodDelete:
 			s.onWHIPDelete(ctx, m[3])
 		}
@@ -431,6 +472,12 @@ func (s *httpServer) onRequest(ctx *gin.Context) {
 
 		case len(ctx.Request.URL.Path) >= 2:
 			switch {
+			case len(ctx.Request.URL.Path) > len("/abr") && strings.HasSuffix(ctx.Request.URL.Path, "/abr"):
+				ctx.Header("Cache-Control", "no-cache")
+				ctx.Header("Content-Type", "text/html")
+				ctx.Writer.WriteHeader(http.StatusOK)
+				ctx.Writer.Write(abrIndex)
+
 			case len(ctx.Request.URL.Path) > len("/publish") && strings.HasSuffix(ctx.Request.URL.Path, "/publish"):
 				s.onPage(ctx, ctx.Request.URL.Path[1:len(ctx.Request.URL.Path)-len("/publish")], true)
 

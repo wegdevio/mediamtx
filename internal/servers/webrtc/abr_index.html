@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WHEP ABR</title>
+<style>
+  :root { --bg: #111; --fg: #ddd; --mut: #888; --line: #333; --acc: #4af; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 ui-monospace, Menlo, monospace; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  video { width: 100%; background: #000; aspect-ratio: 16/9; display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  button, select, input { background: #222; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; font: inherit; }
+  button.on { border-color: var(--acc); color: var(--acc); }
+  input { width: 80px; }
+  pre { background: #1a1a1a; border: 1px solid var(--line); padding: 10px; overflow-x: auto; margin: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .mut { color: var(--mut); }
+</style>
+</head>
+<body>
+<main>
+  <video id="v" muted playsinline autoplay></video>
+  <div class="row">
+    <label>codec <select id="codec">
+      <option value="">auto (SDP offer + server pref AV1&gt;H264)</option>
+      <option value="av1">AV1 only</option>
+      <option value="h264">H264 only</option>
+    </select></label>
+    <button id="play">play</button>
+    <button id="stop">stop</button>
+  </div>
+  <div class="row" id="layers"></div>
+  <div class="row">
+    <span class="mut">link emulation (edge started with MTX_ABR_DEBUG=1):</span>
+    cap <input id="cap" type="number" value="2000"> kbps
+    <button id="capOn">apply</button><button id="capOff">off</button>
+  </div>
+  <div class="grid">
+    <pre id="client">-</pre>
+    <pre id="server">-</pre>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const endpoint = location.origin + location.pathname.replace(/abr\/?$/, '') + 'whep' + location.search;
+let pc = null, resource = null, timer = null, prev = null;
+
+// Codec choice is expressed in the SDP offer (setCodecPreferences), so the
+// server picks it through normal negotiation. In "auto", AV1 is dropped when
+// this device cannot decode it power-efficiently.
+async function videoCodecs(choice) {
+  const all = RTCRtpReceiver.getCapabilities('video').codecs;
+  const keep = (m) => all.filter((c) => c.mimeType.toLowerCase() === m);
+  const rtx = all.filter((c) => /rtx|red|ulpfec/i.test(c.mimeType));
+  if (choice === 'av1') return [...keep('video/av1'), ...rtx];
+  if (choice === 'h264') return [...keep('video/h264'), ...rtx];
+  let av1ok = false;
+  try {
+    const r = await navigator.mediaCapabilities.decodingInfo({ type: 'webrtc',
+      video: { contentType: 'video/AV1', width: 1920, height: 1080, bitrate: 3e6, framerate: 25 } });
+    av1ok = r.supported && r.powerEfficient;
+  } catch (e) {}
+  return [...(av1ok ? keep('video/av1') : []), ...keep('video/h264'), ...rtx];
+}
+
+async function play() {
+  await stop();
+  pc = new RTCPeerConnection();
+  const vt = pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  vt.setCodecPreferences(await videoCodecs($('codec').value));
+  pc.ontrack = (ev) => {
+    if (!$('v').srcObject) $('v').srcObject = new MediaStream();
+    $('v').srcObject.addTrack(ev.track);
+    $('v').play().catch(() => {});
+  };
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise((r) => {
+    if (pc.iceGatheringState === 'complete') return r();
+    pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && r();
+    setTimeout(r, 2000);
+  });
+  const t0 = performance.now();
+  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp });
+  if (res.status !== 201) { $('client').textContent = 'POST ' + res.status + ' ' + await res.text(); return; }
+  resource = new URL(res.headers.get('Location'), endpoint).toString();
+  await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
+  $('client').textContent = 'POST 201 in ' + Math.round(performance.now() - t0) + ' ms';
+  timer = setInterval(poll, 1000);
+}
+
+async function stop() {
+  clearInterval(timer);
+  if (resource) fetch(resource, { method: 'DELETE' }).catch(() => {});
+  if (pc) pc.close();
+  pc = null; resource = null; prev = null;
+  $('v').srcObject = null;
+}
+
+async function patch(body) {
+  if (!resource) return;
+  const r = await fetch(resource, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) alertBox(await r.text());
+  render(await r.json().catch(() => null));
+}
+function alertBox(t) { $('server').textContent = t; }
+
+function render(st) {
+  if (!st || !st.variants) return;
+  const L = $('layers');
+  const sig = st.mode + '|' + (st.active ? st.active.path : '') + '|' + st.variants.length;
+  if (L.dataset.sig === sig) return renderText(st);
+  L.dataset.sig = sig;
+  L.innerHTML = '';
+  const mk = (label, on, fn) => { const b = document.createElement('button'); b.textContent = label; if (on) b.className = 'on'; b.onclick = fn; L.appendChild(b); };
+  mk('auto', st.mode === 'auto', () => patch({ mode: 'auto' }));
+  for (const v of st.variants) {
+    const on = st.mode === 'manual' && st.active && st.active.path === v.path;
+    mk(`${v.codec} ${v.height}p ${(v.bitrate / 1e6).toFixed(1)}M`, on, () => patch({ layer: v.path }));
+  }
+  renderText(st);
+}
+
+function renderText(st) {
+  const a = st.active ? `${st.active.path} (${st.active.height}p)` : '-';
+  const p = st.pending ? st.pending.path : '-';
+  $('server').textContent =
+    `server  codec ${st.codec}  mode ${st.mode}\n` +
+    `active  ${a}\npending ${p}\n` +
+    `RR loss ${(st.loss * 100).toFixed(1)}%  NACK ${st.nacks}  PLI ${st.plis}\n` +
+    `switches ${st.switches}  last switch delay ${st.switchDelayMs} ms\n` +
+    `up-switch after ${st.upStableForMs / 1000}s clean` +
+    (st.simCapKbps ? `\nsim cap ${st.simCapKbps} kbps, dropped ${st.simDropped}` : '');
+}
+
+async function poll() {
+  if (!pc) return;
+  fetch(resource).then((r) => r.json()).then(render).catch(() => {});
+  const stats = await pc.getStats();
+  let v = null, codecs = {};
+  stats.forEach((s) => {
+    if (s.type === 'inbound-rtp' && s.kind === 'video') v = s;
+    if (s.type === 'codec') codecs[s.id] = s.mimeType;
+  });
+  if (!v) return;
+  let kbps = 0;
+  if (prev) kbps = ((v.bytesReceived - prev.bytesReceived) * 8) / ((v.timestamp - prev.timestamp));
+  prev = v;
+  $('client').textContent =
+    `client  ${codecs[v.codecId] || '?'}  ${v.frameWidth || 0}x${v.frameHeight || 0} @ ${v.framesPerSecond || 0} fps\n` +
+    `recv    ${kbps.toFixed(0)} kbps\n` +
+    `lost    ${v.packetsLost}  NACK ${v.nackCount}  PLI ${v.pliCount}\n` +
+    `freezes ${v.freezeCount ?? '-'}  decoded ${v.framesDecoded}  dropped ${v.framesDropped ?? 0}\n` +
+    `jitter buffer ${v.jitterBufferEmittedCount ? (1000 * v.jitterBufferDelay / v.jitterBufferEmittedCount).toFixed(0) : '-'} ms\n` +
+    `decoder ${v.decoderImplementation || '-'}`;
+}
+
+$('v').onclick = (e) => e.preventDefault();
+$('play').onclick = play;
+$('stop').onclick = stop;
+$('capOn').onclick = () => patch({ simCapKbps: parseInt($('cap').value, 10) || 0 });
+$('capOff').onclick = () => patch({ simCapKbps: 0 });
+window.addEventListener('beforeunload', stop);
+play();
+</script>
+</body>
+</html>
