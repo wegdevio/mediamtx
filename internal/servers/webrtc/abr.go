@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,10 +165,10 @@ type abrState struct {
 }
 
 type abrPatch struct {
-	Mode       string `json:"mode"`   // "auto" | "manual"
-	Layer      string `json:"layer"`  // variant path
-	Height     int    `json:"height"` // or variant height
-	Step       string `json:"step"`   // "up" | "down"
+	Mode       string `json:"mode"`  // "auto" | "manual"
+	Layer      string `json:"layer"` // variant path
+	Name       string `json:"name"`  // or variant name
+	Step       string `json:"step"`  // "up" | "down"
 	SimCapKbps *int   `json:"simCapKbps"`
 }
 
@@ -718,14 +719,14 @@ func (a *abrSession) patch(body []byte) (*abrState, error) {
 			return nil, fmt.Errorf("unknown layer '%s'", p.Layer)
 		}
 
-	case p.Height != 0:
+	case p.Name != "":
 		for i, v := range a.variants {
-			if v.Height == p.Height {
+			if v.Name == p.Name {
 				target = i
 			}
 		}
 		if target < 0 {
-			return nil, fmt.Errorf("no layer with height %d", p.Height)
+			return nil, fmt.Errorf("no layer named '%s'", p.Name)
 		}
 
 	case p.Step == "down":
@@ -749,6 +750,15 @@ func (a *abrSession) patch(body []byte) (*abrState, error) {
 	return a.stateLocked(), nil
 }
 
+// abrResolvePath replaces $G1, $G2... in a variant path with the groups
+// of the regular expression that matched the ABR path.
+func abrResolvePath(p string, matches []string) string {
+	for i := len(matches) - 1; i >= 1; i-- {
+		p = strings.ReplaceAll(p, "$G"+strconv.Itoa(i), matches[i])
+	}
+	return p
+}
+
 // runReadABR serves a read session of a path that has abrVariants.
 func (s *session) runReadABR(
 	errGroupCtx context.Context,
@@ -767,8 +777,14 @@ func (s *session) runReadABR(
 	}
 	a.initialize()
 
+	var matches []string
+	if pathConf.Regexp != nil {
+		matches = pathConf.Regexp.FindStringSubmatch(s.pathName)
+	}
+
 	for _, v := range pathConf.ABRVariants {
 		if v.Codec == codec {
+			v.Path = abrResolvePath(v.Path, matches)
 			a.variants = append(a.variants, v)
 		}
 	}
@@ -782,7 +798,7 @@ func (s *session) runReadABR(
 			start = len(a.variants) - 1
 		default:
 			for i, v := range a.variants {
-				if fmt.Sprint(v.Height) == h || v.Path == h {
+				if v.Name == h || v.Path == h {
 					start = i
 				}
 			}

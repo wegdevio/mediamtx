@@ -192,6 +192,51 @@ func TestConfFromFile(t *testing.T) {
 	}
 }
 
+func TestConfABRVariantPlaceholders(t *testing.T) {
+	tmpf := createTempFile(t, []byte("paths:\n"+
+		"  \"~^abr/(.+)$\":\n"+
+		"    abrVariants:\n"+
+		"      - { path: hbn/$G1_1080, codec: h264, name: 1080p, bitrate: 3000000 }\n"+
+		"      - { path: hbn/$G1_720, codec: h264, name: 720p, bitrate: 1500000 }\n"))
+
+	conf, _, err := Load(tmpf, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "hbn/$G1_1080", conf.Paths["~^abr/(.+)$"].ABRVariants[0].Path)
+}
+
+func TestConfABRVariantName(t *testing.T) {
+	for _, ca := range []struct {
+		name string
+		yml  string
+		err  string
+	}{
+		{
+			"missing",
+			"      - { path: a_1080, codec: h264, bitrate: 3000000 }\n",
+			"ABR variant 'a_1080': name is required",
+		},
+		{
+			"duplicate",
+			"      - { path: a_1080, codec: h264, name: hd, bitrate: 3000000 }\n" +
+				"      - { path: a_720, codec: h264, name: hd, bitrate: 1500000 }\n",
+			"duplicate h264 ABR variant name 'hd'",
+		},
+	} {
+		t.Run(ca.name, func(t *testing.T) {
+			tmpf := createTempFile(t, []byte("paths:\n  abr:\n    abrVariants:\n"+ca.yml))
+			_, _, err := Load(tmpf, nil, nil)
+			require.ErrorContains(t, err, ca.err)
+		})
+	}
+
+	// the same name in different codec ladders is fine
+	tmpf := createTempFile(t, []byte("paths:\n  abr:\n    abrVariants:\n"+
+		"      - { path: a_av1, codec: av1, name: hd, bitrate: 2000000 }\n"+
+		"      - { path: a_h264, codec: h264, name: hd, bitrate: 3000000 }\n"))
+	_, _, err := Load(tmpf, nil, nil)
+	require.NoError(t, err)
+}
+
 func TestConfFromFileAndEnv(t *testing.T) {
 	// global parameter
 	t.Setenv("RTSP_PROTOCOLS", "tcp")

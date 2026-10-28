@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,4 +43,11 @@ func TestABRPickCodec(t *testing.T) {
 	noAV1 := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n"
 	_, err = abrPickCodec([]byte(noAV1), "", both)
 	require.Error(t, err)
+}
+
+func TestABRResolvePath(t *testing.T) {
+	m := regexp.MustCompile(`^abr/(.+)_(\d+)$`).FindStringSubmatch("abr/stream_12")
+	require.Equal(t, "hbn/stream_h264_1080", abrResolvePath("hbn/$G1_h264_1080", m))
+	require.Equal(t, "x/12/stream", abrResolvePath("x/$G2/$G1", m))
+	require.Equal(t, "static", abrResolvePath("static", nil))
 }

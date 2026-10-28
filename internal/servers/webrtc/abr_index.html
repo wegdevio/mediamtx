@@ -118,13 +118,13 @@ function render(st) {
   mk('auto', st.mode === 'auto', () => patch({ mode: 'auto' }));
   for (const v of st.variants) {
     const on = st.mode === 'manual' && st.active && st.active.path === v.path;
-    mk(`${v.codec} ${v.height}p ${(v.bitrate / 1e6).toFixed(1)}M`, on, () => patch({ layer: v.path }));
+    mk(`${v.codec} ${v.name} ${(v.bitrate / 1e6).toFixed(1)}M`, on, () => patch({ layer: v.path }));
   }
   renderText(st);
 }
 
 function renderText(st) {
-  const a = st.active ? `${st.active.path} (${st.active.height}p)` : '-';
+  const a = st.active ? `${st.active.path} (${st.active.name})` : '-';
   const p = st.pending ? st.pending.path : '-';
   $('server').textContent =
     `server  codec ${st.codec}  mode ${st.mode}\n` +

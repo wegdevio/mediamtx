@@ -474,6 +474,15 @@ func (pconf *Path) validate(
 
 	// common configuration errors
 
+	abrNames := make(map[string]struct{})
+	for _, v := range pconf.ABRVariants {
+		key := v.Codec + "/" + v.Name
+		if _, ok := abrNames[key]; ok {
+			return fmt.Errorf("duplicate %s ABR variant name '%s'", v.Codec, v.Name)
+		}
+		abrNames[key] = struct{}{}
+	}
+
 	if pconf.SRTPublishPassphrase != "" && pconf.Source != "publisher" {
 		return fmt.Errorf("'srtPublishPassphase' can only be used when source is 'publisher'")
 	}

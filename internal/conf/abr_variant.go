@@ -8,10 +8,12 @@ import (
 
 // ABRVariant is an item of abrVariants.
 // It points to another path that carries one codec / resolution of the same content.
+// When the ABR path is a regular expression, Path can contain $G1, $G2...,
+// replaced with the regular expression groups of the requested path.
 type ABRVariant struct {
 	Path    string `json:"path"`
 	Codec   string `json:"codec"`
-	Height  int    `json:"height"`
+	Name    string `json:"name"`
 	Bitrate int    `json:"bitrate"`
 }
 
@@ -23,9 +25,13 @@ func (v *ABRVariant) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	err = IsValidPathName(v.Path)
+	err = IsValidPathName(reSourcePlaceholder.ReplaceAllString(v.Path, "abc"))
 	if err != nil {
 		return fmt.Errorf("invalid ABR variant path '%s': %w", v.Path, err)
+	}
+
+	if v.Name == "" {
+		return fmt.Errorf("ABR variant '%s': name is required", v.Path)
 	}
 
 	switch v.Codec {

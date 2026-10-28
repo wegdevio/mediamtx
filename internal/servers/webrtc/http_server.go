@@ -478,6 +478,9 @@ func (s *httpServer) onRequest(ctx *gin.Context) {
 				ctx.Writer.WriteHeader(http.StatusOK)
 				ctx.Writer.Write(abrIndex)
 
+			case len(ctx.Request.URL.Path) > len("/.flv") && strings.HasSuffix(ctx.Request.URL.Path, ".flv"):
+				s.onFLV(ctx, ctx.Request.URL.Path[1:len(ctx.Request.URL.Path)-len(".flv")])
+
 			case len(ctx.Request.URL.Path) > len("/publish") && strings.HasSuffix(ctx.Request.URL.Path, "/publish"):
 				s.onPage(ctx, ctx.Request.URL.Path[1:len(ctx.Request.URL.Path)-len("/publish")], true)
 
