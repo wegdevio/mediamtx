@@ -1,0 +1,54 @@
+# ABR edge: on-demand RTMP pull, single WHEP endpoint per ladder.
+# Run:   ./mediamtx abr.yml
+# Test:  http://127.0.0.1:8989/<app>/<name>/abr   e.g. hbn/rtc_test/abr
+# WHEP:  http://127.0.0.1:8989/<app>/<name>/whep
+# FLV:   http://127.0.0.1:8989/<app>/<name>.flv   (?start=low|720p, fixed layer)
+#        http://127.0.0.1:8989/pull/<app>/<stream>.flv (single origin stream, no ABR)
+logLevel: info
+api: yes
+apiAddress: 127.0.0.1:9998
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+moq: no
+
+webrtc: yes
+webrtcAddress: :8989
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8199
+webrtcLocalTCPAddress: ""
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcICEServers2: []
+
+pathDefaults:
+  # rendition pulled only while somebody reads it, dropped 10 s after last reader
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+
+paths:
+  # Any origin app/stream, pulled on demand:
+  #   /pull/<app>/<stream> -> rtmp://<sourceDomains[app]>/<app>/<stream>
+  # (prefix 'pull/' keeps it from also matching the ABR paths below)
+  "~^pull/([^/]+)/([^/]+)$":
+    source: rtmp://$DOMAIN/$G1/$G2
+    # lookup key for $DOMAIN (default $G1 = app)
+    sourceDomainKey: $G1
+    sourceDomains:
+      hbn: pull-rtc-tc.pkg588.app
+      # fallback for apps not listed; remove to reject unknown apps
+      "*": pull-rtc-tc.pkg588.app
+
+  # ABR for any app/ladder: /<app>/<name> is served from
+  #   pull/<app>/<name>_h264_1080 + pull/<app>/<name>_h264_720
+  # (two segments only, so it never matches the three-segment pull/ paths)
+  "~^([^/]+)/([^/]+)$":
+    sourceOnDemand: no
+    abrVariants:
+      - { path: pull/$G1/$G2_hdxrtc, codec: h264, name: 1080p, bitrate: 3000000 }
+      - { path: pull/$G1/$G2_sdxrtc,  codec: h264, name: 720p,   bitrate: 1500000 }
