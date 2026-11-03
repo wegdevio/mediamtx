@@ -81,7 +81,8 @@ func checkRedirect(v string) error {
 }
 
 func validateURL(source string) (*url.URL, error) {
-	s := reSourcePlaceholderPort.ReplaceAllString(source, ":1935")
+	s := strings.ReplaceAll(source, "$DOMAIN", "abc")
+	s = reSourcePlaceholderPort.ReplaceAllString(s, ":1935")
 	s = reSourcePlaceholder.ReplaceAllString(s, "abc")
 
 	u, err := url.Parse(s)
@@ -219,15 +220,17 @@ type Path struct {
 	Name   string         `json:"name"` // filled by Validate()
 
 	// General
-	Source                     string   `json:"source"`
-	SourceFingerprint          string   `json:"sourceFingerprint"`
-	SourceOnDemand             bool     `json:"sourceOnDemand"`
-	SourceOnDemandStartTimeout Duration `json:"sourceOnDemandStartTimeout"`
-	SourceOnDemandCloseAfter   Duration `json:"sourceOnDemandCloseAfter"`
-	MaxReaders                 int      `json:"maxReaders"`
-	SRTReadPassphrase          string   `json:"srtReadPassphrase"`
-	Fallback                   *string  `json:"fallback,omitempty" deprecated:"true"`
-	UseAbsoluteTimestamp       bool     `json:"useAbsoluteTimestamp"`
+	Source                     string            `json:"source"`
+	SourceFingerprint          string            `json:"sourceFingerprint"`
+	SourceDomainKey            string            `json:"sourceDomainKey"`
+	SourceDomains              map[string]string `json:"sourceDomains"`
+	SourceOnDemand             bool              `json:"sourceOnDemand"`
+	SourceOnDemandStartTimeout Duration          `json:"sourceOnDemandStartTimeout"`
+	SourceOnDemandCloseAfter   Duration          `json:"sourceOnDemandCloseAfter"`
+	MaxReaders                 int               `json:"maxReaders"`
+	SRTReadPassphrase          string            `json:"srtReadPassphrase"`
+	Fallback                   *string           `json:"fallback,omitempty" deprecated:"true"`
+	UseAbsoluteTimestamp       bool              `json:"useAbsoluteTimestamp"`
 
 	// Always available
 	AlwaysAvailable         bool                   `json:"alwaysAvailable"`
@@ -481,6 +484,10 @@ func (pconf *Path) validate(
 			return fmt.Errorf("duplicate %s ABR variant name '%s'", v.Codec, v.Name)
 		}
 		abrNames[key] = struct{}{}
+	}
+
+	if strings.Contains(pconf.Source, "$DOMAIN") && len(pconf.SourceDomains) == 0 {
+		return fmt.Errorf("'source' contains $DOMAIN but 'sourceDomains' is empty")
 	}
 
 	if pconf.SRTPublishPassphrase != "" && pconf.Source != "publisher" {

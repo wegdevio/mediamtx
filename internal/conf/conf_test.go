@@ -1268,3 +1268,32 @@ func TestConfAddDeprecatedCredentialsTwice(t *testing.T) {
 	require.NoError(t, c3.PatchPath("test", &patch))
 	require.Equal(t, c2, c3)
 }
+
+func TestSourceDomains(t *testing.T) {
+	tmpf := createTempFile(t, []byte("paths:\n"+
+		"  \"~^pull/([^/]+)/([^/]+)$\":\n"+
+		"    source: rtmp://$DOMAIN/$G1/$G2\n"+
+		"    sourceOnDemand: yes\n"+
+		"    sourceDomains:\n"+
+		"      hbn: pull-a.example.com\n"+
+		"      \"*\": pull-default.example.com\n"))
+	defer os.Remove(tmpf)
+
+	conf, _, err := Load(tmpf, nil, nil)
+	require.NoError(t, err)
+
+	pconf := conf.Paths["~^pull/([^/]+)/([^/]+)$"]
+	require.Equal(t, map[string]string{
+		"hbn": "pull-a.example.com",
+		"*":   "pull-default.example.com",
+	}, pconf.SourceDomains)
+
+	tmpf2 := createTempFile(t, []byte("paths:\n"+
+		"  \"~^pull/([^/]+)$\":\n"+
+		"    source: rtmp://$DOMAIN/$G1\n"+
+		"    sourceOnDemand: yes\n"))
+	defer os.Remove(tmpf2)
+
+	_, _, err = Load(tmpf2, nil, nil)
+	require.EqualError(t, err, "'source' contains $DOMAIN but 'sourceDomains' is empty")
+}

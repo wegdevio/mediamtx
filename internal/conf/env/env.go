@@ -135,11 +135,31 @@ func loadEnvInternal(env map[string]string, prefix string, prv reflect.Value) er
 			}
 
 			// initialize only if there's at least one key
+			if prv.IsNil() {
+				prv.Set(reflect.New(rt))
+			}
 			if prv.Elem().IsNil() {
 				prv.Elem().Set(reflect.MakeMap(rt))
 			}
 
 			mapKeyLower := strings.ToLower(mapKey)
+
+			// non-pointer values (e.g. map[string]string)
+			if rt.Elem().Kind() != reflect.Pointer {
+				nv := reflect.New(rt.Elem())
+				if cur := prv.Elem().MapIndex(reflect.ValueOf(mapKeyLower)); cur.IsValid() {
+					nv.Elem().Set(cur)
+				}
+
+				err := loadEnvInternal(env, prefix+"_"+mapKey, nv)
+				if err != nil {
+					return err
+				}
+
+				prv.Elem().SetMapIndex(reflect.ValueOf(mapKeyLower), nv.Elem())
+				continue
+			}
+
 			nv := prv.Elem().MapIndex(reflect.ValueOf(mapKeyLower))
 			zero := reflect.Value{}
 			if nv == zero {

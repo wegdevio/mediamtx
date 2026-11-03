@@ -497,6 +497,7 @@ pathDefaults:
   # The following variables can be used:
   # * $MTX_QUERY: query parameters (passed by first reader)
   # * $G1, $G2, ...: regular expression groups, if path name is a regular expression.
+  # * $DOMAIN: value of sourceDomains whose key matches sourceDomainKey.
   source: publisher
   # If the source is a URL, and the source TLS certificate is self-signed
   # or invalid, you can provide the fingerprint of the certificate in order to
@@ -504,6 +505,12 @@ pathDefaults:
   # openssl s_client -connect source_ip:source_port </dev/null 2>/dev/null | sed -n '/BEGIN/,/END/p' > server.crt
   # openssl x509 -in server.crt -noout -fingerprint -sha256 | cut -d "=" -f2 | tr -d ':'
   sourceFingerprint:
+  # Key used to pick $DOMAIN from sourceDomains. It can contain $G1, $G2, ...
+  # If empty, $G1 is used.
+  sourceDomainKey:
+  # Map of keys to domains, used to fill $DOMAIN in source.
+  # Key "*" is used when no other key matches.
+  sourceDomains: {}
   # If the source is a URL, it will be pulled only when at least
   # one reader is connected, saving bandwidth.
   sourceOnDemand: false

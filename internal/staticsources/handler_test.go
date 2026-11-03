@@ -3,6 +3,7 @@ package staticsources
 import (
 	"testing"
 
+	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/stretchr/testify/require"
 )
 
@@ -125,4 +126,49 @@ func TestResolveSource(t *testing.T) {
 			require.Equal(t, ca.expected, result)
 		})
 	}
+}
+
+func TestResolveDomain(t *testing.T) {
+	pconf := &conf.Path{
+		SourceDomains: map[string]string{
+			"hbn": "pull-a.example.com",
+			"*":   "pull-default.example.com",
+		},
+	}
+
+	for _, ca := range []struct {
+		name     string
+		source   string
+		matches  []string
+		expected string
+	}{
+		{
+			name:     "match",
+			source:   "rtmp://$DOMAIN/$G1/$G2",
+			matches:  []string{"pull/hbn/s1", "hbn", "s1"},
+			expected: "rtmp://pull-a.example.com/$G1/$G2",
+		},
+		{
+			name:     "fallback",
+			source:   "rtmp://$DOMAIN/$G1/$G2",
+			matches:  []string{"pull/xyz/s1", "xyz", "s1"},
+			expected: "rtmp://pull-default.example.com/$G1/$G2",
+		},
+		{
+			name:     "no placeholder",
+			source:   "rtmp://host/$G1",
+			matches:  []string{"pull/abc", "abc"},
+			expected: "rtmp://host/$G1",
+		},
+	} {
+		t.Run(ca.name, func(t *testing.T) {
+			res, err := resolveDomain(ca.source, pconf, ca.matches)
+			require.NoError(t, err)
+			require.Equal(t, ca.expected, res)
+		})
+	}
+
+	delete(pconf.SourceDomains, "*")
+	_, err := resolveDomain("rtmp://$DOMAIN/x", pconf, []string{"pull/xyz", "xyz"})
+	require.EqualError(t, err, "no entry in 'sourceDomains' for key 'xyz'")
 }

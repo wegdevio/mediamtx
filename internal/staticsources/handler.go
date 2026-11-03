@@ -37,14 +37,43 @@ func emptyTimer() *time.Timer {
 	return t
 }
 
-func resolveSource(s string, matches []string, query string) string {
+func replaceGroups(s string, matches []string) string {
 	for i := len(matches) - 1; i >= 1; i-- {
 		s = strings.ReplaceAll(s, "$G"+strconv.FormatInt(int64(i), 10), matches[i])
 	}
+	return s
+}
+
+func resolveSource(s string, matches []string, query string) string {
+	s = replaceGroups(s, matches)
 
 	s = strings.ReplaceAll(s, "$MTX_QUERY", query)
 
 	return s
+}
+
+// resolveDomain replaces $DOMAIN in source with the sourceDomains entry
+// whose key is sourceDomainKey (default $G1, with $G1, $G2... resolved); "*" is the fallback.
+func resolveDomain(source string, pconf *conf.Path, matches []string) (string, error) {
+	if !strings.Contains(source, "$DOMAIN") {
+		return source, nil
+	}
+
+	key := pconf.SourceDomainKey
+	if key == "" {
+		key = "$G1"
+	}
+	key = replaceGroups(key, matches)
+
+	domain, ok := pconf.SourceDomains[key]
+	if !ok {
+		domain, ok = pconf.SourceDomains["*"]
+		if !ok {
+			return "", fmt.Errorf("no entry in 'sourceDomains' for key '%s'", key)
+		}
+	}
+
+	return strings.ReplaceAll(source, "$DOMAIN", domain), nil
 }
 
 type staticSource interface {
@@ -254,7 +283,9 @@ func (s *Handler) run() {
 	runReloadConf := make(chan *conf.Path)
 
 	recreate := func() {
-		resolvedSource := resolveSource(s.Conf.Source, s.Matches, s.query)
+		// domain is resolved before groups, since a domain can contain $G1, $G2...
+		resolvedSource, err := resolveDomain(s.Conf.Source, s.Conf, s.Matches)
+		resolvedSource = resolveSource(resolvedSource, s.Matches, s.query)
 
 		s.mutex.Lock()
 		s.state = defs.APIStaticSourceStateRunning
@@ -263,6 +294,10 @@ func (s *Handler) run() {
 
 		runCtx, runCtxCancel = context.WithCancel(context.Background())
 		go func() {
+			if err != nil {
+				runErr <- err
+				return
+			}
 			runErr <- s.instance.Run(defs.StaticSourceRunParams{
 				Context:        runCtx,
 				ResolvedSource: resolvedSource,
