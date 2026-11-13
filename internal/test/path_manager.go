@@ -1,6 +1,8 @@
 package test
 
 import (
+	"github.com/bluenviron/mediamtx/internal/auth"
+	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/defs"
 )
 
@@ -13,7 +15,11 @@ type PathManager struct {
 }
 
 // FindPathConf implements PathManager.
+// Without FindPathConfImpl, it returns an empty path configuration.
 func (pm *PathManager) FindPathConf(req defs.PathFindPathConfReq) (*defs.PathFindPathConfRes, error) {
+	if pm.FindPathConfImpl == nil {
+		return &defs.PathFindPathConfRes{Conf: &conf.Path{}, AuthRes: &auth.Result{}}, nil
+	}
 	return pm.FindPathConfImpl(req)
 }
 

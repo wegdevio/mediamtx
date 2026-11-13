@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
-	"slices"
 	"time"
 
 	"github.com/bluenviron/gortmplib/pkg/amf0"
@@ -200,47 +198,7 @@ func (r *flvReader) APIReaderDescribe() *defs.APIPathReader {
 
 // flvPickVariant picks the variant of an ABR path served by HTTP-FLV.
 func flvPickVariant(pathConf *conf.Path, pathName string, query string) (string, string, error) {
-	q, _ := url.ParseQuery(query)
-
-	codec := q.Get("codec")
-	if codec == "" {
-		codec = "h264"
-		if !slices.ContainsFunc(pathConf.ABRVariants, func(v conf.ABRVariant) bool { return v.Codec == "h264" }) {
-			codec = pathConf.ABRVariants[0].Codec
-		}
-	}
-
-	var matches []string
-	if pathConf.Regexp != nil {
-		matches = pathConf.Regexp.FindStringSubmatch(pathName)
-	}
-
-	var variants []conf.ABRVariant
-	for _, v := range pathConf.ABRVariants {
-		if v.Codec == codec {
-			v.Path = abrResolvePath(v.Path, matches)
-			variants = append(variants, v)
-		}
-	}
-	if len(variants) == 0 {
-		return "", "", fmt.Errorf("no %s variant", codec)
-	}
-	slices.SortStableFunc(variants, func(x, y conf.ABRVariant) int { return y.Bitrate - x.Bitrate })
-
-	pick := variants[0]
-	switch h := q.Get("start"); h {
-	case "", "high":
-	case "low":
-		pick = variants[len(variants)-1]
-	default:
-		for _, v := range variants {
-			if v.Name == h || v.Path == h {
-				pick = v
-			}
-		}
-	}
-
-	return pick.Path, codec, nil
+	return conf.PickABRVariant(pathConf, pathName, query)
 }
 
 func (s *httpServer) onFLV(ctx *gin.Context, pathName string) {

@@ -26,7 +26,6 @@ import (
 	"net/url"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -753,10 +752,7 @@ func (a *abrSession) patch(body []byte) (*abrState, error) {
 // abrResolvePath replaces $G1, $G2... in a variant path with the groups
 // of the regular expression that matched the ABR path.
 func abrResolvePath(p string, matches []string) string {
-	for i := len(matches) - 1; i >= 1; i-- {
-		p = strings.ReplaceAll(p, "$G"+strconv.Itoa(i), matches[i])
-	}
-	return p
+	return conf.ResolveABRVariantPath(p, matches)
 }
 
 // runReadABR serves a read session of a path that has abrVariants.

@@ -4,6 +4,8 @@
 # WHEP:  http://127.0.0.1:8989/<app>/<name>/whep
 # FLV:   http://127.0.0.1:8989/<app>/<name>.flv   (?start=low|720p, fixed layer)
 #        http://127.0.0.1:8989/pull/<app>/<stream>.flv (single origin stream, no ABR)
+# MoQ:   https://127.0.0.1:8892/<app>/<name>          (web reader; WebTransport on UDP :8892)
+#        same ?codec= / ?start= as FLV: one fixed layer, no ABR switching
 logLevel: info
 api: yes
 apiAddress: 127.0.0.1:9998
@@ -14,7 +16,19 @@ rtsp: no
 rtmp: no
 hls: no
 srt: no
-moq: no
+
+# MoQ (Media over QUIC): WebTransport over HTTP/3 on UDP, page + /fingerprint over TCP.
+# The HTTP/3 listener always uses its own 14-day self-signed certificate; browsers
+# trust it through serverCertificateHashes, fetched from https://<edge>:8892/<path>/fingerprint.
+# moqServerCert only covers the TCP side: use a real certificate in production,
+# or open https://<edge>:8892/ once to accept auto.crt.
+moq: yes
+moqHTTP2Address: :8892
+moqHTTP3Address: :8892
+moqQUICAddress: :8893
+moqServerKey: auto.key
+moqServerCert: auto.crt
+moqAllowOrigins: ["*"]
 
 webrtc: yes
 webrtcAddress: :8989

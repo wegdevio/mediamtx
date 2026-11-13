@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/bluenviron/mediamtx/internal/auth"
+	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/logger"
 	"github.com/bluenviron/mediamtx/internal/protocols/moq"
@@ -411,6 +412,34 @@ func (s *session) getPathNameAndQuery() (string, string) {
 	return s.pathName, s.query
 }
 
+// resolveABRPath points a read of an ABR path (a virtual path with
+// abrVariants, which has no stream of its own) at one of its variants,
+// picked by ?codec= and ?start= as in HTTP-FLV. MoQ has no layer switching.
+func (s *session) resolveABRPath(req *defs.PathAccessRequest) error {
+	confRes, err := s.pathManager.FindPathConf(defs.PathFindPathConfReq{
+		Author:        s,
+		AccessRequest: *req,
+	})
+	if err != nil {
+		return err
+	}
+
+	if len(confRes.Conf.ABRVariants) == 0 {
+		return nil
+	}
+
+	variant, _, err := conf.PickABRVariant(confRes.Conf, req.Name, req.Query)
+	if err != nil {
+		return err
+	}
+
+	s.Log(logger.Debug, "ABR path %s served from variant %s", req.Name, variant)
+	req.Name = variant
+	req.SkipAuth = true // authenticated on the ABR path
+
+	return nil
+}
+
 func (s *session) onSubscribeCatalog(
 	errGroupCtx context.Context,
 	errGroup *errgroup.Group,
@@ -428,19 +457,26 @@ func (s *session) onSubscribeCatalog(
 	pathName, query := s.getPathNameAndQuery()
 
 	remoteHost, _, _ := net.SplitHostPort(s.conn.RemoteAddr().String())
-	addRes, err := s.pathManager.AddReader(defs.PathAddReaderReq{
-		Author: s,
-		AccessRequest: defs.PathAccessRequest{
-			Name:                 pathName,
-			Query:                query,
-			Proto:                auth.ProtocolMoQ,
-			ID:                   &s.uuid,
-			Credentials:          credentialsFromAuthorizationToken(findAuthorizationToken(m.Parameters)),
-			IP:                   net.ParseIP(remoteHost),
-			UserAgent:            s.userAgent,
-			EnableAskCredentials: false,
-		},
-	})
+	accessReq := defs.PathAccessRequest{
+		Name:                 pathName,
+		Query:                query,
+		Proto:                auth.ProtocolMoQ,
+		ID:                   &s.uuid,
+		Credentials:          credentialsFromAuthorizationToken(findAuthorizationToken(m.Parameters)),
+		IP:                   net.ParseIP(remoteHost),
+		UserAgent:            s.userAgent,
+		EnableAskCredentials: false,
+	}
+
+	err := s.resolveABRPath(&accessReq)
+
+	var addRes *defs.PathAddReaderRes
+	if err == nil {
+		addRes, err = s.pathManager.AddReader(defs.PathAddReaderReq{
+			Author:        s,
+			AccessRequest: accessReq,
+		})
+	}
 	if err != nil {
 		var code controlmessage.RequestErrorCode
 		if _, ok := errors.AsType[*auth.Error](err); ok {

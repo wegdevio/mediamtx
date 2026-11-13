@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1176,4 +1177,82 @@ func TestServerErrorTooManyTracks(t *testing.T) {
 		return parent.contains("too many catalog tracks: 51")
 	}, time.Second, 50*time.Millisecond)
 	require.False(t, addPublisherCalled.Load())
+}
+
+func TestServerReadABRPath(t *testing.T) {
+	for _, ca := range []struct {
+		query   string
+		variant string
+	}{
+		{"", "pull/hbn/test_hd"},
+		{"?start=low", "pull/hbn/test_sd"},
+		{"?start=720p", "pull/hbn/test_sd"},
+	} {
+		t.Run(ca.variant+ca.query, func(t *testing.T) {
+			var gotReq atomic.Pointer[defs.PathAccessRequest]
+			s := &moq.Server{
+				HTTP2Address: "127.0.0.1:19895",
+				HTTP3Address: "127.0.0.1:19896",
+				QUICAddress:  "127.0.0.1:19897",
+				ServerCert:   test.CreateTempFile(t, test.TLSCertPub),
+				ServerKey:    test.CreateTempFile(t, test.TLSCertKey),
+				ReadTimeout:  conf.Duration(10 * time.Second),
+				WriteTimeout: conf.Duration(10 * time.Second),
+				PathManager: &test.PathManager{
+					FindPathConfImpl: func(_ defs.PathFindPathConfReq) (*defs.PathFindPathConfRes, error) {
+						return &defs.PathFindPathConfRes{
+							Conf: &conf.Path{
+								Regexp: regexp.MustCompile(`^([^/]+)/([^/]+)$`),
+								ABRVariants: []conf.ABRVariant{
+									{Path: "pull/$G1/$G2_hd", Codec: "h264", Name: "1080p", Bitrate: 3000000},
+									{Path: "pull/$G1/$G2_sd", Codec: "h264", Name: "720p", Bitrate: 1500000},
+								},
+							},
+							AuthRes: &auth.Result{},
+						}, nil
+					},
+					AddReaderImpl: func(req defs.PathAddReaderReq) (*defs.PathAddReaderRes, error) {
+						gotReq.Store(&req.AccessRequest)
+						return nil, fmt.Errorf("reader unavailable")
+					},
+				},
+				Parent: test.NilLogger,
+			}
+			require.NoError(t, s.Initialize())
+			defer s.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			d := &webtransport.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+				QUICConfig: &quic.Config{
+					EnableDatagrams:                  true,
+					EnableStreamResetPartialDelivery: true,
+				},
+				ApplicationProtocols: []string{version.Draft22.String()},
+			}
+			defer d.Close() //nolint:errcheck
+			res, sx, err := d.Dial(ctx, "https://127.0.0.1:19896/hbn/test"+ca.query, nil)
+			require.NoError(t, err)
+			defer sx.CloseWithError(0, "") //nolint:errcheck
+			defer res.Body.Close()         //nolint:errcheck
+			performWTSetup(ctx, t, sx, version.Draft22)
+
+			bidi, err := sx.OpenStreamSync(ctx)
+			require.NoError(t, err)
+			defer bidi.Close() //nolint:errcheck
+			body := append([]byte{0x01, 0x00, 0x07}, []byte("catalog")...)
+			body = append(body, 0x00)
+			_, err = bidi.Write(append([]byte{0x03, 0x00, byte(len(body))}, body...))
+			require.NoError(t, err)
+			msg, err := controlmessage.Read(bidi, version.Draft22)
+			require.NoError(t, err)
+			require.IsType(t, &controlmessage.RequestError{}, msg)
+
+			req := gotReq.Load()
+			require.NotNil(t, req)
+			require.Equal(t, ca.variant, req.Name)
+			require.True(t, req.SkipAuth)
+		})
+	}
 }
