@@ -104,6 +104,7 @@ type Handler struct {
 	UDPReadBufferSize  uint
 	UDPWriteBufferSize uint
 	RTPMaxPayloadSize  int
+	UDPMaxPayloadSize  int
 	SupportsIPv6       bool
 	Matches            []string
 	PathManager        handlerPathManager
@@ -150,6 +151,7 @@ func (s *Handler) Initialize() {
 			WriteQueueSize:     s.WriteQueueSize,
 			UDPReadBufferSize:  s.UDPReadBufferSize,
 			UDPWriteBufferSize: s.UDPWriteBufferSize,
+			UDPMaxPayloadSize:  s.UDPMaxPayloadSize,
 			Parent:             s,
 		}
 
@@ -188,8 +190,9 @@ func (s *Handler) Initialize() {
 
 	case strings.HasPrefix(s.Conf.Source, "moqt://"):
 		s.instance = &ssmoq.Source{
-			ReadTimeout: s.ReadTimeout,
-			Parent:      s,
+			ReadTimeout:       s.ReadTimeout,
+			UDPMaxPayloadSize: s.UDPMaxPayloadSize,
+			Parent:            s,
 		}
 
 	case strings.HasPrefix(s.Conf.Source, "whep://") ||

@@ -20,10 +20,12 @@ import (
 
 	"github.com/bluenviron/gortsplib/v5/pkg/readbuffer"
 	"github.com/bluenviron/gortsplib/v5/pkg/writebuffer"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
 
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/protocols/quicp"
 )
 
 const (
@@ -81,6 +83,7 @@ type Server struct {
 	Address            string
 	UDPReadBufferSize  uint
 	UDPWriteBufferSize uint
+	UDPMaxPayloadSize  int
 	EnableWebTransport bool
 	Handler            http.Handler
 	Parent             logger.Writer
@@ -141,6 +144,9 @@ func (s *Server) Initialize() error {
 	s.inner = &http3.Server{
 		Handler:   s.Handler,
 		TLSConfig: tlsConfig,
+		QUICConfig: &quic.Config{
+			InitialPacketSize: quicp.InitialPacketSize(s.UDPMaxPayloadSize),
+		},
 	}
 
 	if s.EnableWebTransport {
@@ -152,6 +158,14 @@ func (s *Server) Initialize() error {
 		s.wtServer = &webtransport.Server{
 			H3:          s.inner,
 			CheckOrigin: func(_ *http.Request) bool { return true },
+
+			// advertise WebTransport limits explicitly.
+			// This is required by iOS Safari (iOS 26.6).
+			Config: &webtransport.Config{
+				MaxIncomingStreams:    1 << 20,
+				MaxIncomingUniStreams: 1 << 20,
+				MaxIncomingData:       1 << 40,
+			},
 		}
 	}
 
